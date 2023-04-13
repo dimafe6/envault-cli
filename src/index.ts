@@ -1,10 +1,14 @@
 import {Command, flags} from '@oclif/command'
-const axios = require('axios').default
 import cli from 'cli-ux'
+import {addConfigToGitignore, getConfig, parseValue, writeConfig} from './utils'
+
+const axios = require('axios').default
 const fs = require('fs').promises
+const filesystem = require('fs')
 const path = require('path')
 const process = require('process')
-import {addConfigToGitignore, getConfig, parseValue, writeConfig} from './utils'
+const ProgressBar = require('progress')
+const crypto = require('crypto');
 
 interface Variable {
     key: string
@@ -25,10 +29,7 @@ class Envault extends Command {
         filename: flags.string({description: 'name of .env file'}),
         force: flags.boolean({description: 'accept all prompts'}),
         help: flags.help({char: 'h'}),
-        // update: flags.boolean({
-        //     char: 'u',
-        //     description: 'update Envault from the local .env',
-        // }),
+        forceDownload: flags.boolean({description: 'force download files and overwrite local files'}),
         version: flags.version({char: 'v'}),
     }
 
@@ -46,6 +47,107 @@ class Envault extends Command {
             hidden: true,
         },
     ]
+    private secureFilesDir: string = '.secure_files';
+
+    private md5File(filePath: string) {
+        return new Promise((resolve, reject) => {
+            // Create a read stream from the file
+            const stream = filesystem.createReadStream(filePath);
+
+            // Create the MD5 hash object
+            const hash = crypto.createHash('md5');
+
+            // Handle errors on the stream
+            stream.on('error', (error: any) => {
+                reject(error);
+            });
+
+            // Update the hash with data from the stream
+            stream.on('data', (chunk: any) => {
+                hash.update(chunk);
+            });
+
+            // Handle the end of the stream
+            stream.on('end', () => {
+                // Get the final hash value as a hex string
+                const result = hash.digest('hex');
+                resolve(result);
+            });
+        });
+    }
+
+    private deleteFilesInDirectory(dirPath: any, serverFiles: any) {
+        const serverFileNames = serverFiles.map((file: any) => file.name);
+        const files = filesystem.readdirSync(dirPath);
+
+        files.forEach((file: any) => {
+            const filePath = path.join(dirPath, file);
+
+            // Check if the file is a directory
+            if (filesystem.statSync(filePath).isDirectory()) {
+                // Recursively call this function on the subdirectory
+                this.deleteFilesInDirectory(filePath, serverFiles);
+            } else {
+                if (!serverFileNames.includes(file)) {
+                    // Delete the file
+                    filesystem.unlinkSync(filePath);
+                }
+            }
+        });
+    }
+
+    async processSecureFiles(files: object[], server: string, environment: string, token: string) {
+        const {args, flags} = this.parse(Envault)
+
+        this.log('Deleting files which not exists on the server...')
+        this.deleteFilesInDirectory(this.secureFilesDir, files);
+
+        this.log('Downloading files...')
+
+        const promises = files.map(async (file: any) => {
+            const path = `${this.secureFilesDir}/${file.name}`
+            const localFileExists = filesystem.existsSync(path);
+            const existsFileMd5 = localFileExists ? await this.md5File(path) : null;
+            const isFilesEqual = existsFileMd5 === file.md5;
+
+            if (!isFilesEqual || !localFileExists || flags.forceDownload) {
+                const url = `https://${server}/api/v1/apps/${environment}/download/${token}/file/${file.uuid}`;
+                const {data, headers} = await axios.get(url, {responseType: 'stream'});
+
+                // Get the total file size from the Content-Length header
+                const totalSize = parseInt(headers['content-length'], 10);
+
+                // Create a progress bar for each file
+                const fileBar = new ProgressBar(`[:bar] :percent :etas`, {
+                    complete: '=',
+                    incomplete: ' ',
+                    width: 20,
+                    total: totalSize
+                });
+
+                // Write the file to disk as it downloads
+                const writer = filesystem.createWriteStream(path);
+                data.on('data', (chunk: string | any[]) => {
+                    fileBar.tick(chunk.length);
+                    writer.write(chunk);
+                });
+
+                // Return a promise that resolves when the file has finished downloading
+                return new Promise((resolve, reject) => {
+                    data.on('end', () => {
+                        writer.end();
+                        resolve();
+                    });
+                    data.on('error', reject);
+                });
+            } else {
+                this.log(`MD5 for the local file ${file.name} the same as servers file MD5. Skip downloading.`)
+            }
+        });
+
+        await Promise.all(promises);
+        this.log('All files downloaded successfully!');
+    }
 
     async run() {
         const {args, flags} = this.parse(Envault)
@@ -72,7 +174,22 @@ class Envault extends Command {
 
             cli.action.stop()
 
-            if (! response.data.authToken) return
+            if (!response.data.authToken) return
+
+            // Process secure files
+            if (!filesystem.existsSync(this.secureFilesDir)) {
+                filesystem.mkdirSync(this.secureFilesDir)
+            }
+
+            if (filesystem.readdirSync(this.secureFilesDir).length > 0) {
+                if (!flags.force && !await cli.confirm(`Directory ${this.secureFilesDir} is not empty! If you continue, all files in this directory will be replaced server files. Continue? Y/n`)) {
+                    this.warn(`File synchronization aborted as a ${this.secureFilesDir} directory exists.`)
+                } else {
+                    await this.processSecureFiles(response.data.app.files, server, environment, token)
+                }
+            } else {
+                await this.processSecureFiles(response.data.app.files, server, environment, token)
+            }
 
             const variables: Array<Variable> = response.data.app.variables
 
@@ -81,7 +198,7 @@ class Envault extends Command {
             try {
                 contents = (await fs.readFile(filename)).toString()
             } catch (error) {
-                if (! flags.force && ! await cli.confirm(`A ${filename} file was not found. Would you like to create a new one? Y/n`)) return this.error(`Initialization aborted as a ${filename} file was not found.`)
+                if (!flags.force && !await cli.confirm(`A ${filename} file was not found. Would you like to create a new one? Y/n`)) return this.error(`Initialization aborted as a ${filename} file was not found.`)
 
                 for (const variable of variables) {
                     contents += `${variable.key}=\n`
@@ -101,15 +218,15 @@ class Envault extends Command {
 
             if (await addConfigToGitignore()) this.log('.gitignore updated.')
 
-            const localVariables = require('dotenv').config({ path: path.resolve(process.cwd(), filename) }).parsed
+            const localVariables = require('dotenv').config({path: path.resolve(process.cwd(), filename)}).parsed
 
             let updates: Array<Variable> = []
 
             for (const variable of variables) {
-                if (! (variable.key in localVariables)) {
-                    if (! flags.constructive) continue
+                if (!(variable.key in localVariables)) {
+                    if (!flags.constructive) continue
 
-                    if (! flags.force && ! await cli.confirm(`The ${variable.key} variable is not currently present in your ${filename} file. Would you like to add it? Y/n`)) continue
+                    if (!flags.force && !await cli.confirm(`The ${variable.key} variable is not currently present in your ${filename} file. Would you like to add it? Y/n`)) continue
                 }
 
                 if (localVariables[variable.key] === parseValue(variable.latest_version.value)) continue
@@ -118,7 +235,7 @@ class Envault extends Command {
 
                 contents = contents.replace(expression, `${variable.key}=${variable.latest_version.value}`)
 
-                if (! contents.match(expression)) {
+                if (!contents.match(expression)) {
                     contents += `\n${variable.key}=${variable.latest_version.value}\n`
                 }
 
@@ -148,7 +265,7 @@ class Envault extends Command {
 
         const config = await getConfig(args.server, args.environment)
 
-        if (! config) this.error('Please initialize your Envault environment before trying to pull.')
+        if (!config) this.error('Please initialize your Envault environment before trying to pull.')
 
         let authToken = config.authToken
         let environment = config.environment
@@ -178,7 +295,7 @@ class Envault extends Command {
         try {
             contents = (await fs.readFile(filename)).toString()
         } catch (error) {
-            if (! flags.force && ! await cli.confirm(`A ${filename} file was not found. Would you like to create a new one? Y/n`)) return this.error(`Pull aborted as a ${filename} file was not found.`)
+            if (!flags.force && !await cli.confirm(`A ${filename} file was not found. Would you like to create a new one? Y/n`)) return this.error(`Pull aborted as a ${filename} file was not found.`)
 
             for (const variable of variables) {
                 contents += `${variable.key}=\n`
@@ -187,15 +304,15 @@ class Envault extends Command {
             await fs.writeFile(filename, contents)
         }
 
-        const localVariables = require('dotenv').config({ path: path.resolve(process.cwd(), filename) }).parsed
+        const localVariables = require('dotenv').config({path: path.resolve(process.cwd(), filename)}).parsed
 
         let updates: Array<Variable> = []
 
         for (const variable of variables) {
-            if (! (variable.key in localVariables)) {
-                if (! flags.constructive) continue
+            if (!(variable.key in localVariables)) {
+                if (!flags.constructive) continue
 
-                if (! flags.force && ! await cli.confirm(`The ${variable.key} variable is not currently present in your ${filename} file. Would you like to add it? Y/n`)) continue
+                if (!flags.force && !await cli.confirm(`The ${variable.key} variable is not currently present in your ${filename} file. Would you like to add it? Y/n`)) continue
             }
 
             if (localVariables[variable.key] === parseValue(variable.latest_version.value)) continue
@@ -204,7 +321,7 @@ class Envault extends Command {
 
             contents = contents.replace(expression, `${variable.key}=${variable.latest_version.value}`)
 
-            if (! contents.match(expression)) {
+            if (!contents.match(expression)) {
                 contents += `\n${variable.key}=${variable.latest_version.value}\n`
             }
 

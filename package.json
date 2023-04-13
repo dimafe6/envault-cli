@@ -1,12 +1,12 @@
 {
-    "name": "envault",
+    "name": "envault-ex",
     "description": "Sync your .env file with Envault.",
     "version": "3.1.2",
-    "author": "Envault",
+    "author": "Dmytro Feshchenko",
     "bin": {
-        "envault": "./bin/run"
+        "envault-ex": "./bin/run"
     },
-    "bugs": "https://github.com/envault/cli/issues",
+    "bugs": "https://github.com/dimafe6/envault-cli/issues",
     "dependencies": {
         "@oclif/command": "^1.8.0",
         "@oclif/config": "^1.17.0",
@@ -14,7 +14,8 @@
         "axios": "^0.21.1",
         "cli-ux": "^5.5.1",
         "dotenv": "^8.2.0",
-        "tslib": "^1.14.1"
+        "progress": "^2.0.3",
+        "tslib": "^1.4.1"
     },
     "devDependencies": {
         "@oclif/dev-cli": "^1.26.0",
@@ -35,16 +36,16 @@
         "/bin",
         "/lib"
     ],
-    "homepage": "https://github.com/envault/cli",
+    "homepage": "https://github.com/dimafe6/envault-cli",
     "keywords": [
         "oclif"
     ],
     "license": "MIT",
     "main": "lib/index.js",
     "oclif": {
-        "bin": "envault"
+        "bin": "envault-ex"
     },
-    "repository": "https://github.com/envault/cli.git",
+    "repository": "git@github.com:dimafe6/envault-cli.git",
     "scripts": {
         "prepack": "rm -rf lib && tsc -b",
         "test": "nyc --extension .ts mocha --forbid-only \"test/**/*.test.ts\""
