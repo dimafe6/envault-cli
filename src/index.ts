@@ -9,6 +9,7 @@ const path = require('path')
 const process = require('process')
 const ProgressBar = require('progress')
 const crypto = require('crypto');
+const Multiprogress = require('multi-progress');
 
 interface Variable {
     key: string
@@ -48,6 +49,8 @@ class Envault extends Command {
         },
     ]
     private secureFilesDir: string = '.secure_files';
+
+    private multiProgress = new Multiprogress(process.stdout);
 
     private md5File(filePath: string) {
         return new Promise((resolve, reject) => {
@@ -118,10 +121,10 @@ class Envault extends Command {
                 const totalSize = parseInt(headers['content-length'], 10);
 
                 // Create a progress bar for each file
-                const fileBar = new ProgressBar(`[:bar] :percent :etas`, {
+                const fileBar = this.multiProgress.newBar(`[:bar] :percent :etas`, {
                     complete: '=',
                     incomplete: ' ',
-                    width: 20,
+                    width: 40,
                     total: totalSize
                 });
 
@@ -142,6 +145,7 @@ class Envault extends Command {
                 });
             } else {
                 this.log(`MD5 for the local file ${file.name} the same as servers file MD5. Skip downloading.`)
+                return Promise.resolve(); // return a resolved promise for skipped files
             }
         });
 
