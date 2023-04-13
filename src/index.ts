@@ -7,7 +7,6 @@ const fs = require('fs').promises
 const filesystem = require('fs')
 const path = require('path')
 const process = require('process')
-const ProgressBar = require('progress')
 const crypto = require('crypto');
 const Multiprogress = require('multi-progress');
 
@@ -144,7 +143,6 @@ class Envault extends Command {
                     data.on('error', reject);
                 });
             } else {
-                this.log(`MD5 for the local file ${file.name} the same as servers file MD5. Skip downloading.`)
                 return Promise.resolve(); // return a resolved promise for skipped files
             }
         });
