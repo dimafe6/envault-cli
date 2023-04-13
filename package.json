@@ -1,7 +1,7 @@
 {
     "name": "envault-ex",
     "description": "Sync your .env file with Envault.",
-    "version": "3.2.1",
+    "version": "3.2.2",
     "author": "Dmytro Feshchenko",
     "bin": {
         "envault-ex": "./bin/run"
