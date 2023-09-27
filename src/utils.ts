@@ -2,6 +2,7 @@ const fs = require('fs').promises
 
 interface ConfigItem {
     authToken: string
+    token: string
     environment: string
     filename: string
     server: string

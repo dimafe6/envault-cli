@@ -98,6 +98,23 @@ class Envault extends Command {
         });
     }
 
+    async runSyncSecureFiles(force: boolean, files: any, server: string, environment: string, token: string) {
+        // Process secure files
+        if (!filesystem.existsSync(this.secureFilesDir)) {
+            filesystem.mkdirSync(this.secureFilesDir)
+        }
+
+        if (filesystem.readdirSync(this.secureFilesDir).length > 0) {
+            if (!force && !await cli.confirm(`Directory ${this.secureFilesDir} is not empty! If you continue, all files in this directory will be replaced server files. Continue? Y/n`)) {
+                this.warn(`File synchronization aborted as a ${this.secureFilesDir} directory exists.`)
+            } else {
+                await this.processSecureFiles(files, server, environment, token)
+            }
+        } else {
+            await this.processSecureFiles(files, server, environment, token)
+        }
+    }
+
     async processSecureFiles(files: object[], server: string, environment: string, token: string) {
         const {args, flags} = this.parse(Envault)
 
@@ -179,19 +196,7 @@ class Envault extends Command {
             if (!response.data.authToken) return
 
             // Process secure files
-            if (!filesystem.existsSync(this.secureFilesDir)) {
-                filesystem.mkdirSync(this.secureFilesDir)
-            }
-
-            if (filesystem.readdirSync(this.secureFilesDir).length > 0) {
-                if (!flags.force && !await cli.confirm(`Directory ${this.secureFilesDir} is not empty! If you continue, all files in this directory will be replaced server files. Continue? Y/n`)) {
-                    this.warn(`File synchronization aborted as a ${this.secureFilesDir} directory exists.`)
-                } else {
-                    await this.processSecureFiles(response.data.app.files, server, environment, token)
-                }
-            } else {
-                await this.processSecureFiles(response.data.app.files, server, environment, token)
-            }
+            await this.runSyncSecureFiles(flags.forceDownload, response.data.app.files, server, environment, token);
 
             const variables: Array<Variable> = response.data.app.variables
 
@@ -211,6 +216,7 @@ class Envault extends Command {
 
             await writeConfig({
                 authToken: response.data.authToken,
+                token: token,
                 environment: environment,
                 filename: filename,
                 server: server,
@@ -342,9 +348,10 @@ class Envault extends Command {
             }
 
             updatesTree.display()
-
-            return
         }
+
+        // Process secure files
+        await this.runSyncSecureFiles(flags.forceDownload, response.data.files, server, environment, config.token);
 
         this.log('You are already up to date 🎉')
     }
