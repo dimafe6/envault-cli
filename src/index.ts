@@ -30,6 +30,7 @@ class Envault extends Command {
         force: flags.boolean({description: 'accept all prompts'}),
         help: flags.help({char: 'h'}),
         forceDownload: flags.boolean({description: 'force download files and overwrite local files'}),
+        secureFilesDirectory: flags.string({description: 'Directory to save secure files', default: '.secure_files'}),
         version: flags.version({char: 'v'}),
     }
 
@@ -47,7 +48,6 @@ class Envault extends Command {
             hidden: true,
         },
     ]
-    private secureFilesDir: string = '.secure_files';
 
     private multiProgress = new Multiprogress(process.stdout);
 
@@ -98,33 +98,33 @@ class Envault extends Command {
         });
     }
 
-    async runSyncSecureFiles(force: boolean, files: any, server: string, environment: string, token: string) {
+    async runSyncSecureFiles(force: boolean, files: any, server: string, environment: string, token: string, secureFilesDirectory: string) {
         // Process secure files
-        if (!filesystem.existsSync(this.secureFilesDir)) {
-            filesystem.mkdirSync(this.secureFilesDir)
+        if (!filesystem.existsSync(secureFilesDirectory)) {
+            filesystem.mkdirSync(secureFilesDirectory, {recursive: true})
         }
 
-        if (filesystem.readdirSync(this.secureFilesDir).length > 0) {
-            if (!force && !await cli.confirm(`Directory ${this.secureFilesDir} is not empty! If you continue, all files in this directory will be replaced server files. Continue? Y/n`)) {
-                this.warn(`File synchronization aborted as a ${this.secureFilesDir} directory exists.`)
+        if (filesystem.readdirSync(secureFilesDirectory).length > 0) {
+            if (!force && !await cli.confirm(`Directory ${secureFilesDirectory} is not empty! If you continue, all files in this directory will be replaced server files. Continue? Y/n`)) {
+                this.warn(`File synchronization aborted as a ${secureFilesDirectory} directory exists.`)
             } else {
-                await this.processSecureFiles(files, server, environment, token)
+                await this.processSecureFiles(files, server, environment, token, secureFilesDirectory)
             }
         } else {
-            await this.processSecureFiles(files, server, environment, token)
+            await this.processSecureFiles(files, server, environment, token, secureFilesDirectory)
         }
     }
 
-    async processSecureFiles(files: object[], server: string, environment: string, token: string) {
+    async processSecureFiles(files: object[], server: string, environment: string, token: string, secureFilesDirectory: string) {
         const {args, flags} = this.parse(Envault)
 
         this.log('Deleting files which not exists on the server...')
-        this.deleteFilesInDirectory(this.secureFilesDir, files);
+        this.deleteFilesInDirectory(secureFilesDirectory, files);
 
         this.log('Downloading files...')
 
         const promises = files.map(async (file: any) => {
-            const path = `${this.secureFilesDir}/${file.name}`
+            const path = `${secureFilesDirectory}/${file.name}`
             const localFileExists = filesystem.existsSync(path);
             const existsFileMd5 = localFileExists ? await this.md5File(path) : null;
             const isFilesEqual = existsFileMd5 === file.md5;
@@ -178,6 +178,7 @@ class Envault extends Command {
             let filename = flags.filename ?? '.env'
             let server = args.server
             let token = args.token
+            let secureFilesDirectory = flags.secureFilesDirectory
 
             cli.action.start('Connecting to your Envault server')
 
@@ -196,7 +197,7 @@ class Envault extends Command {
             if (!response.data.authToken) return
 
             // Process secure files
-            await this.runSyncSecureFiles(flags.forceDownload, response.data.app.files, server, environment, token);
+            await this.runSyncSecureFiles(flags.forceDownload, response.data.app.files, server, environment, token, flags.secureFilesDirectory);
 
             const variables: Array<Variable> = response.data.app.variables
 
@@ -220,6 +221,7 @@ class Envault extends Command {
                 environment: environment,
                 filename: filename,
                 server: server,
+                secureFilesDirectory: secureFilesDirectory
             })
 
             this.log('Configuration file set up.')
@@ -351,7 +353,7 @@ class Envault extends Command {
         }
 
         // Process secure files
-        await this.runSyncSecureFiles(flags.forceDownload, response.data.files, server, environment, config.token);
+        await this.runSyncSecureFiles(flags.forceDownload, response.data.files, server, environment, config.token, config.secureFilesDirectory || flags.secureFilesDirectory);
 
         this.log('You are already up to date 🎉')
     }

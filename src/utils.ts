@@ -6,6 +6,7 @@ interface ConfigItem {
     environment: string
     filename: string
     server: string
+    secureFilesDirectory: string
 }
 
 export async function addConfigToGitignore() {
